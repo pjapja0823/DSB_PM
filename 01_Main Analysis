@@ -1,0 +1,85 @@
+######################################################################=#
+# PURPOSE: Main analysis for individual-level time-stratified case-crossover design
+# PAPER: (-)
+# Programmer: Jinah Park from Seoul National University
+# Program: R
+######################################################################=#
+
+setwd("Z:/PM-ED")
+library(lubridate); library(data.table); library(dplyr); library(readxl)
+library(tsModel); library(dlnm); library(survival); library(splines)
+
+load("00_DBsave_R/DSB_230828.RData.RData")
+# Check the attached dataset
+
+dat_type <- dat_type_matched %>% lapply(function(x){
+  x$holiday <- as.factor(x$holiday)
+  return(x)
+}); rm(dat_type_matched)
+
+
+## TEMPERATURE DATA LOAD ----------------------------------
+load("Z:/heat-ED/temp0621_REV.RData") %>% data.table()
+temp0621$date <- as.Date(temp0621$date)
+
+# APPLY LAG TEMPERATURE
+temp0621 <- temp0621 %>% mutate(lag1_temp=tmean %>% Lag(1, group=list(sgg_b)),
+                                lag2_temp=tmean %>% Lag(2, group=list(sgg_b)),
+                                lag3_temp=tmean %>% Lag(3, group=list(sgg_b)),
+                                lag4_temp=tmean %>% Lag(4, group=list(sgg_b)),
+                                lag5_temp=tmean %>% Lag(5, group=list(sgg_b)),
+                                lag6_temp=tmean %>% Lag(6, group=list(sgg_b)),
+                                lag7_temp=tmean %>% Lag(7, group=list(sgg_b))) %>%
+  rename(lag0_temp=tmean)
+varfun<-"ns"; vardf<-4 ; lagknots<-c(1,3) #among lag days
+
+## PM DATA LOAD ----------------------------------
+load("230830_pm1521.RData"); pm1521$date <- as.Date(pm1521$date)
+pm1521 <- pm1521 %>% mutate(ma01_pm=pm25 %>% runMean(lags=0:1, group=sgg_b),
+                            ma02_pm=pm25 %>% runMean(lags=0:2, group=sgg_b)) %>% 
+  rename(lag0_pm=pm25)
+
+
+#=############################################################################=#
+## 2. MOVING AVERAGE APPLICATION ###############################################
+#=############################################################################=#
+## 1) TOTAL CAUSE, TOTAL POP (MAIN + SUB1) =====================================
+rtable1 <- data.frame(population=names(dat_type),
+                      cause_of_visit="All cause", expo="lag 0-5",
+                      RR=NA, RR_low=NA, RR_high=NA,
+                      ROR=NA, ROR_low=NA, ROR_high=NA,
+                      PwoD=NA, PwoD_low=NA, PwoD_high=NA)
+
+rtable1 <- data.frame(population=names(dat_type),
+                      cause_of_visit="FOUR cause",
+                      expo="lag 0-1",
+                      RR=rep(NA), RR_low=rep(NA), RR_high=rep(NA), SE=rep(NA))
+
+# z <- qnorm(1-(1-ci.level)/2)
+# SE <- squr(diag(vcov))
+z <- qnorm(1-(1-0.95)/2)
+
+## 1) TOTAL CAUSE, TOTAL POP (MAIN + SUB1) =====================================
+for (i in seq(length(dat_type))){ #each disability type
+  ldat <- dat_type[[i]]
+  ldat <- ldat %>% left_join(temp0621, by=c("MATCHED_DATE"="date", "sgg_b"="sgg_b")) %>% 
+    left_join(pm1521, by=c("MATCHED_DATE"="date", "sgg_b"="sgg_b")) %>% data.table()
+  ldat$holiday <- as.factor(ldat$holiday)
+  
+  tsub <- ldat %>% select(c(lag0_temp, lag1_temp:lag5_temp))
+  cb <- crossbasis(tsub, argvar=list(fun=varfun, df=vardf), arglag=list(knots=lagknots)) #WHL
+  ldat$expo <- ldat$ma01_pm/10
+  #model <- clogit(CASE_YN~ldat$expo + ns(ldat$lag1_temp,df=4) + holiday + strata(ID), data=ldat)
+  model <- clogit(CASE_YN~ldat$expo + cb + holiday + strata(ID), data=ldat)
+  
+    ## (1) MODEL SETTING AND PLOT WITH NS FUNCTION ------------------- #
+    coef <- summary(model)$coef[1]
+    se <- vcov(model)[1,1] %>% sqrt()
+    rr <- c(exp(coef), exp(coef-z*se), exp(coef+z*se), se)
+    
+    ## (2) EXTRACT RR ----------------------------------------------- #
+    rtable1[i,4:7] <-rr
+}
+rm(ldat, model, coef, se, rr, k)
+fwrite(rtable1, "Results/DRAFT/230911_RRTABLE1_pwod.csv")
+gc()

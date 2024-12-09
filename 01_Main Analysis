@@ -36,7 +36,8 @@ varfun<-"ns"; vardf<-4 ; lagknots<-c(1,3) #among lag days
 ## PM DATA LOAD ----------------------------------
 load("230830_pm1521.RData"); pm1521$date <- as.Date(pm1521$date)
 pm1521 <- pm1521 %>% mutate(ma01_pm=pm25 %>% runMean(lags=0:1, group=sgg_b),
-                            ma02_pm=pm25 %>% runMean(lags=0:2, group=sgg_b)) %>% 
+                            ma02_pm=pm25 %>% runMean(lags=0:2, group=sgg_b),
+                            ma03_pm=pm25 %>% runMean(lags=0:3, group=sgg_b)) %>% 
   rename(lag0_pm=pm25)
 
 
@@ -45,14 +46,8 @@ pm1521 <- pm1521 %>% mutate(ma01_pm=pm25 %>% runMean(lags=0:1, group=sgg_b),
 #=############################################################################=#
 ## 1) TOTAL CAUSE, TOTAL POP (MAIN + SUB1) =====================================
 rtable1 <- data.frame(population=names(dat_type),
-                      cause_of_visit="All cause", expo="lag 0-5",
-                      RR=NA, RR_low=NA, RR_high=NA,
-                      ROR=NA, ROR_low=NA, ROR_high=NA,
-                      PwoD=NA, PwoD_low=NA, PwoD_high=NA)
-
-rtable1 <- data.frame(population=names(dat_type),
                       cause_of_visit="FOUR cause",
-                      expo="lag 0-1",
+                      expo="MA 0-3",
                       RR=rep(NA), RR_low=rep(NA), RR_high=rep(NA), SE=rep(NA))
 
 # z <- qnorm(1-(1-ci.level)/2)
@@ -68,7 +63,7 @@ for (i in seq(length(dat_type))){ #each disability type
   
   tsub <- ldat %>% select(c(lag0_temp, lag1_temp:lag5_temp))
   cb <- crossbasis(tsub, argvar=list(fun=varfun, df=vardf), arglag=list(knots=lagknots)) #WHL
-  ldat$expo <- ldat$ma01_pm/10
+  ldat$expo <- ldat$ma03_pm/10
   #model <- clogit(CASE_YN~ldat$expo + ns(ldat$lag1_temp,df=4) + holiday + strata(ID), data=ldat)
   model <- clogit(CASE_YN~ldat$expo + cb + holiday + strata(ID), data=ldat)
   
